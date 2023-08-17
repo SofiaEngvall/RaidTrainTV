@@ -6,19 +6,32 @@ import 'firebase_options.dart'; // Import the DefaultFirebaseOptions class
 import 'package:intl/date_symbol_data_local.dart';
 import 'screens/home_page.dart'; // Import the HomePage
 import 'state.dart'; // Import the AppState class from state.dart
+import 'webview_page.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_webview_plugin/flutter_webview_plugin.dart';
+import 'package:twitch_api/twitch_api.dart';
+
 
 
 final _formKey = GlobalKey<FormState>();
-const String clientId = "wgt3b63eja0ykpkesftb4s3qofqeg9";
 
- 
+const clientId = "wgt3b63eja0ykpkesftb4s3qofqeg9";
+const redirectUri = "https://raidtraintv.firebaseapp.com/__/auth/handler"; // ex: "http://localhost/"
 
 
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  // Ideal time to initialize
+  
+  // Check for the redirect sign-in result
+  // try {
+  //   UserCredential userCredential = await FirebaseAuth.instance.getRedirectResult();
+  //   print("Successfully signed in: ${userCredential.user}");
+  // } catch (error) {
+  //   print("Failed to sign in with redirect: $error");
+  // }
   // await FirebaseAuth.instance.useAuthEmulator('localhost', 56664);
   initializeDateFormatting().then((_) => runApp(MyApp()));
 }
@@ -40,9 +53,319 @@ class MyApp extends StatelessWidget {
             primary: Color.fromARGB(255, 49, 14, 108),
           ),
         ),
-        home: MyHomePage(),
+        home:  const MyHomePage(title: 'Flutter Demo Home Page'),
       ),
     );
   }
 }
 
+
+
+
+class MyHomePage extends StatefulWidget {
+  const MyHomePage({Key? key, required this.title}) : super(key: key);
+
+  final String title;
+
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  final _twitchClient =
+      TwitchClient(clientId: clientId, redirectUri: redirectUri);
+  final _flutterWebviewPlugin = FlutterWebviewPlugin();
+
+  void _urlListener(String url) {
+    if (url.startsWith(redirectUri)) {
+      _twitchClient.initializeToken(TwitchToken.fromUrl(url));
+      _flutterWebviewPlugin.close();
+    }
+  }
+
+  // First authentication through a webview
+  Future<TwitchToken> _openConnectionPage(
+      {List<TwitchApiScope> scopes = const []}) {
+    _flutterWebviewPlugin.onUrlChanged.listen(_urlListener);
+    _flutterWebviewPlugin.onDestroy.listen((_) => Navigator.pop(context));
+
+    // Get authorization URL for the connection with the webview.
+    final url = _twitchClient.authorizeUri(scopes);
+
+    return Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => WebViewPage(url.toString()),
+      ),
+    ).then((_) => _twitchClient.twitchHttpClient.validateToken());
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.scheduleFrameCallback((_) {
+      _openConnectionPage(scopes: TwitchApiScope.values)
+          .then((value) => setState(() {}));
+    });
+  }
+
+  void _displayDataAlert({
+    String? method,
+    String? data,
+    bool isImg = false,
+    bool? isOnline,
+  }) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(method ?? ''),
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isOnline != null)
+                Text(
+                  isOnline ? 'Online' : 'Offline',
+                  style: TextStyle(
+                    color: isOnline ? Colors.green : Colors.red,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              if (!isImg && data != null) Text(data),
+              if (isImg && data != null)
+                Image.network(
+                  data,
+                  loadingBuilder: (_, __, ___) =>
+                      const CircularProgressIndicator(),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+      ),
+      body: ListView(
+        children: <Widget>[
+          Text(
+            'Welcome user: ${_twitchClient.twitchHttpClient.twitchToken?.userId}',
+          ),
+          Text(
+            'Your Twitch token is: ${_twitchClient.twitchHttpClient.twitchToken?.token}',
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient
+                .startCommercial(
+              broadcasterId:
+                  _twitchClient.twitchHttpClient.twitchToken!.userId!,
+              length: 60,
+            )
+                .catchError((error) {
+              _displayDataAlert(
+                method: 'startCommercial',
+                data: error.toString(),
+              );
+              return error;
+            }),
+            child: const Text('Start Commercial'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient
+                .getExtensionAnalytics(first: 1)
+                .catchError((error) {
+              _displayDataAlert(
+                method: 'getExtensionAnalytics',
+                data: error.toString(),
+              );
+              return error;
+            }),
+            child: const Text('Get Extension Analytics'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient
+                .getGameAnalytics(gameId: '493057')
+                .catchError((error) {
+              _displayDataAlert(
+                method: 'getGameAnalytics',
+                data: error.toString(),
+              );
+              return error;
+            }),
+            child: const Text('Get Games Analytics'),
+          ),
+          ElevatedButton(
+            onPressed: () =>
+                _twitchClient.getUsersFollows(toId: '23161357').then(
+                      (value) => _displayDataAlert(
+                        method: 'getUsersFollows',
+                        data: 'Total followers: ${value.total}',
+                      ),
+                    ),
+            child: const Text('Get User Follows from id 23161357'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient.getUsers(ids: ['44322889']).then(
+              (value) => _displayDataAlert(
+                method: value.data.first.displayName,
+                data: value.data.first.description,
+              ),
+            ),
+            child: const Text('Get User Dallas from id'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient.getTopGames().then(
+                  (value) => _displayDataAlert(
+                    method: 'Top Games',
+                    data: value.data
+                        .map<String>((e) => e.name)
+                        .toList()
+                        .join('\n'),
+                  ),
+                ),
+            child: const Text('Get Top Games'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient.getGames(names: ['Fortnite']).then(
+              (value) => _displayDataAlert(
+                method: value.data.first.name,
+                data: value.data.first.getBoxArtUrl(),
+                isImg: true,
+              ),
+            ),
+            child: const Text('Get Fortnite'),
+          ),
+          ElevatedButton(
+            onPressed: () =>
+                _twitchClient.getChannelInformations('44445592').then(
+                      (value) => _displayDataAlert(
+                        method: value.data.first.broadcasterName,
+                        data: value.data.first.title,
+                      ),
+                    ),
+            child: const Text('Get Pokimane Channel Info'),
+          ),
+          ElevatedButton(
+            onPressed: () =>
+                _twitchClient.getStreams(userLogins: ['auronplay']).then(
+              (value) => _displayDataAlert(
+                method: (value.data.isNotEmpty)
+                    ? value.data.first.userLogin
+                    : 'getStreams',
+                data:
+                    'Viewers: ${(value.data.isNotEmpty) ? value.data.first.viewerCount : "No data"}',
+                isOnline: (value.data.isNotEmpty)
+                    ? value.data.first.type == TwitchStreamType.live
+                    : false,
+              ),
+            ),
+            child: const Text('Get auronplay Stream Info'),
+          ),
+          ElevatedButton(
+            onPressed: () =>
+                _twitchClient.searchChannels(query: 'loserfruit').then(
+              (value) {
+                _displayDataAlert(
+                  method: value.data.first.displayName,
+                  data: value.data.first.thumbnailUrl,
+                  isImg: true,
+                  isOnline: value.data.first.isLive,
+                );
+              },
+            ),
+            child: const Text('Search loserfruit Channel'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient.searchCategories(query: 'fort').then(
+                  (value) => _displayDataAlert(
+                    method: value.data.first.name,
+                    data: value.data.first.getBoxArtUrl(),
+                    isImg: true,
+                  ),
+                ),
+            child: const Text('Search "fort" Category'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final id = _twitchClient.twitchHttpClient.twitchToken?.userId;
+              if (id != null) {
+                _twitchClient
+                    .getBroadcasterSubscriptions(broadcasterId: id)
+                    .then(
+                      (value) => _displayDataAlert(
+                        method: value.data.first.userName,
+                        data: value.data.first.tier,
+                      ),
+                    );
+              }
+            },
+            child: const Text('Get Broadcaster Subscriptions'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient.getBitsLeaderboard().then(
+                  (value) => _displayDataAlert(
+                    method: value.data.first.userName,
+                    data: value.data.first.score.toString(),
+                  ),
+                ),
+            child: const Text('Get Bits Leaderboard'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient.getCheermotes().then(
+                  (value) => _displayDataAlert(
+                    method: value.data.first.prefix,
+                    data: value.data.first.tiers
+                        .map((e) => e.id)
+                        .toList()
+                        .toString(),
+                  ),
+                ),
+            child: const Text('Get Cheermotes'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient.modifyChannelinformation(
+              broadcasterId:
+                  _twitchClient.twitchHttpClient.twitchToken!.userId!,
+              title: 'Test',
+            ),
+            child: const Text('Modify your channel title to: Test'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient
+                .getChannelEditors(
+                  broadcasterId:
+                      _twitchClient.twitchHttpClient.twitchToken!.userId!,
+                )
+                .then(
+                  (value) => _displayDataAlert(
+                    method: 'You have ${value.data.length} editors',
+                    data: value.data.map<String>((e) => e.userName).join(', '),
+                  ),
+                ),
+            child: const Text('Get your channel editors'),
+          ),
+          ElevatedButton(
+            onPressed: () => _twitchClient
+                .getCustomRewards(
+                  broadcasterId:
+                      _twitchClient.twitchHttpClient.twitchToken?.userId ?? '',
+                )
+                .then(
+                  (value) => _displayDataAlert(
+                    method: 'Get Custom Rewards',
+                    data: value.data.map<String>((e) => e.title).join(', '),
+                  ),
+                ),
+            child: const Text('Get custom rewards'),
+          ),
+        ],
+      ),
+    );
+  }
+}

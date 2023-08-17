@@ -1,5 +1,4 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:raid_train_tv/utils/fire_auth.dart';
 import 'package:flutter/material.dart';
 import './favorites_page.dart';
 import './raid_trains.dart';
@@ -9,8 +8,6 @@ class MyHomePage extends StatefulWidget {
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
-
-final fireAuth = FireAuth();
 
 
 
@@ -57,9 +54,10 @@ class _MyHomePageState extends State<MyHomePage> {
                     return IconButton(
                       icon: Icon(Icons.login),
                       onPressed: () async {
-                        User? user = await fireAuth.signInWithTwitch();
-                        if (user != null) {
-                          print("Logged in as ${user.displayName}");
+                        try {
+                          print("temp");
+                        } catch (e) {
+                          print(e);
                         }
                       },
                     );
