@@ -3,12 +3,15 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:yaml/yaml.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:http/http.dart' as http;
+
+
 
 class RaidTrains extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<List>(
-      future: fetchData(),
+      future: fetchData($accessToken),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return CircularProgressIndicator();
@@ -21,12 +24,79 @@ class RaidTrains extends StatelessWidget {
     );
   }
 
-  Future<List> fetchData() async {
-    var yamlString = await rootBundle.loadString('assets/raid_trains.yaml');
-    var yamlList = loadYaml(yamlString);
+  // Future<Map<String, String>> getStreamerIcons(String accessToken, List<String> streamerNames) async {
+  // final response = await http.get(
+  //   Uri.parse('https://api.twitch.tv/helix/users?login=${streamerNames.join(",")}'),
+  //   headers: {
+  //     'Client-Id': clientId,
+  //     'Authorization': 'Bearer $accessToken',
+  //   },
+  // );
 
-    return yamlList;
+  Future<Map<String, String>> getStreamerIcons(String accessToken, List<String> streamerNames) async {
+  final response = await http.get(
+    Uri.parse('https://api.twitch.tv/helix/users?login=${streamerNames.join(",")}'),
+    headers: {
+      'Client-Id': 'YOUR_CLIENT_ID',
+      'Authorization': 'Bearer $accessToken',
+    },
+  );
+
+  Map<String, String> icons = {};
+
+  if (response.statusCode == 200) {
+    final data = json.decode(response.body);
+    final users = data['data'] as List;
+
+    for (var user in users) {
+      icons[user['login']] = user['profile_image_url'];
+    }
+  } else {
+    print('Failed to get streamer data. Status code: ${response.statusCode}');
   }
+
+  return icons;
+}
+Future<List> fetchData(String accessToken) async {
+  var yamlString = await rootBundle.loadString('assets/raid_trains.yaml');
+  var yamlList = loadYaml(yamlString);
+
+  // Generate a list of all streamer names in your YAML data
+  List<String> streamerNames = [];
+  for (var hostData in yamlList) {
+    streamerNames.add(hostData['host']);
+    for (var raid in hostData['raids']) {
+      for (var day in raid['days']) {
+        for (var event in day['events']) {
+          streamerNames.add(event['user']);
+        }
+      }
+    }
+  }
+
+  // Remove duplicate names
+  streamerNames = streamerNames.toSet().toList();
+
+  // Fetch the profile image URLs for all streamers
+  Map<String, String> icons = await getStreamerIcons(accessToken, streamerNames);
+
+  // Add the profile_image_url to each streamer in your YAML data
+  for (var hostData in yamlList) {
+    String hostName = hostData['host'];
+    hostData['profile_image_url'] = icons[hostName];
+    
+    for (var raid in hostData['raids']) {
+      for (var day in raid['days']) {
+        for (var event in day['events']) {
+          String streamerName = event['user'];
+          event['profile_image_url'] = icons[streamerName];
+        }
+      }
+    }
+  }
+  
+  return yamlList;
+}
 
   Future<void> _launchURL(Uri url) async {
     if (await canLaunch(url.toString())) {
